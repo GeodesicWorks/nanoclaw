@@ -18,7 +18,12 @@ import { ASSISTANT_NAME } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 // --- Constants ---
 
@@ -148,10 +153,7 @@ export class GeodesicChannel implements Channel {
         'Geodesic message sent',
       );
     } catch (err) {
-      logger.error(
-        { jid, err },
-        'Failed to post agent message to Geodesic',
-      );
+      logger.error({ jid, err }, 'Failed to post agent message to Geodesic');
     }
   }
 
@@ -186,7 +188,10 @@ export class GeodesicChannel implements Channel {
 
   // --- HTTP Request Handler ---
 
-  private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private handleRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
     const url = req.url || '';
     const method = req.method || '';
 
@@ -309,7 +314,13 @@ export class GeodesicChannel implements Channel {
 
     // Report metadata for group discovery
     const timestamp = new Date().toISOString();
-    this.opts.onChatMetadata(jid, timestamp, `Geodesic ${workspaceId.slice(0, 8)}`, 'geodesic', true);
+    this.opts.onChatMetadata(
+      jid,
+      timestamp,
+      `Geodesic ${workspaceId.slice(0, 8)}`,
+      'geodesic',
+      true,
+    );
 
     // Inject message into NanoClaw message flow
     this.opts.onMessage(jid, {
@@ -351,7 +362,11 @@ export class GeodesicChannel implements Channel {
       '/v1/report_ready received (Phase 2 — deferred)',
     );
 
-    this.sendJson(res, 200, { ok: true, run_id: runId, note: 'Builder dispatch deferred to Phase 2' });
+    this.sendJson(res, 200, {
+      ok: true,
+      run_id: runId,
+      note: 'Builder dispatch deferred to Phase 2',
+    });
   }
 
   // --- Intent Classification ---
@@ -386,10 +401,7 @@ export class GeodesicChannel implements Channel {
       clearTimeout(timeout);
 
       if (!resp.ok) {
-        logger.warn(
-          { status: resp.status },
-          'Intent classification API error',
-        );
+        logger.warn({ status: resp.status }, 'Intent classification API error');
         return false;
       }
 
@@ -397,10 +409,7 @@ export class GeodesicChannel implements Channel {
         content: Array<{ text: string }>;
       };
       const answer = data.content[0].text.trim().toUpperCase();
-      logger.info(
-        { answer, prompt: text.slice(0, 80) },
-        'Intent classified',
-      );
+      logger.info({ answer, prompt: text.slice(0, 80) }, 'Intent classified');
       return answer.startsWith('YES');
     } catch (err) {
       logger.warn({ err }, 'Intent classification failed, defaulting to NO');
@@ -566,10 +575,7 @@ export class GeodesicChannel implements Channel {
               continue;
             }
 
-            if (
-              eventType === 'user_message' &&
-              seenWorkflowStarted
-            ) {
+            if (eventType === 'user_message' && seenWorkflowStarted) {
               const userMsg = String(event.message || '').trim();
               if (!userMsg || (eventId && processedIds.has(eventId))) continue;
               if (eventId) processedIds.add(eventId);
@@ -680,11 +686,15 @@ export class GeodesicChannel implements Channel {
       throw new Error(`OAuth token request failed: ${resp.status}`);
     }
 
-    const data = (await resp.json()) as { access_token: string; expires_in?: number };
+    const data = (await resp.json()) as {
+      access_token: string;
+      expires_in?: number;
+    };
     this.cachedToken = data.access_token;
     // Refresh 5 minutes before expiry, or use TOKEN_REFRESH_MS
     const expiresIn = (data.expires_in || 3600) * 1000;
-    this.tokenExpiresAt = Date.now() + Math.min(expiresIn - 300_000, TOKEN_REFRESH_MS);
+    this.tokenExpiresAt =
+      Date.now() + Math.min(expiresIn - 300_000, TOKEN_REFRESH_MS);
     return this.cachedToken;
   }
 
@@ -822,10 +832,7 @@ function loadGeodesicCreds(): GeodesicCreds | null {
 
   for (const key of required) {
     if (!creds[key]) {
-      logger.warn(
-        { key, credsPath },
-        'Missing required Geodesic credential',
-      );
+      logger.warn({ key, credsPath }, 'Missing required Geodesic credential');
       return null;
     }
   }
@@ -838,7 +845,9 @@ function loadGeodesicCreds(): GeodesicCreds | null {
 registerChannel('geodesic', (opts: ChannelOpts) => {
   const creds = loadGeodesicCreds();
   if (!creds) {
-    logger.info('Geodesic: ~/.geodesic-creds.env not found or incomplete — skipping');
+    logger.info(
+      'Geodesic: ~/.geodesic-creds.env not found or incomplete — skipping',
+    );
     return null;
   }
   return new GeodesicChannel(opts, creds);

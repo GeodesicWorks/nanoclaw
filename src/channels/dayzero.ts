@@ -14,7 +14,12 @@ import http from 'http';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 // --- Constants ---
 
@@ -61,15 +66,18 @@ export class DayZeroChannel implements Channel {
 
     const envConfig = readEnvFile(['DAYZERO_PORT', 'DAYZERO_API_KEY']);
     this.port = parseInt(
-      process.env.DAYZERO_PORT || envConfig.DAYZERO_PORT || String(DEFAULT_PORT),
+      process.env.DAYZERO_PORT ||
+        envConfig.DAYZERO_PORT ||
+        String(DEFAULT_PORT),
       10,
     );
-    this.apiKey = process.env.DAYZERO_API_KEY || envConfig.DAYZERO_API_KEY || null;
+    this.apiKey =
+      process.env.DAYZERO_API_KEY || envConfig.DAYZERO_API_KEY || null;
 
     if (!this.apiKey) {
       logger.warn(
         'DAYZERO_API_KEY not set. DayZero API will accept unauthenticated requests. ' +
-        'Set DAYZERO_API_KEY for production use.',
+          'Set DAYZERO_API_KEY for production use.',
       );
     }
   }
@@ -141,7 +149,10 @@ export class DayZeroChannel implements Channel {
 
   // --- HTTP Request Handler ---
 
-  private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+  private handleRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
     const url = req.url || '';
     const method = req.method || '';
 
@@ -158,7 +169,8 @@ export class DayZeroChannel implements Channel {
         'Unauthorized DayZero API request',
       );
       this.sendJson(res, 401, {
-        error: 'Unauthorized. Include X-Api-Key header or Authorization: Bearer <token>',
+        error:
+          'Unauthorized. Include X-Api-Key header or Authorization: Bearer <token>',
       });
       return;
     }
@@ -219,9 +231,13 @@ export class DayZeroChannel implements Channel {
     const phase = body.phase ? String(body.phase) : undefined;
 
     // Geodesic workflow integration fields
-    const workflowRunId = body.workflow_run_id ? String(body.workflow_run_id) : undefined;
+    const workflowRunId = body.workflow_run_id
+      ? String(body.workflow_run_id)
+      : undefined;
     const tenantId = body.tenant_id ? String(body.tenant_id) : undefined;
-    const workspaceId = body.workspace_id ? String(body.workspace_id) : undefined;
+    const workspaceId = body.workspace_id
+      ? String(body.workspace_id)
+      : undefined;
 
     if (!workflowType) {
       this.sendJson(res, 400, {
@@ -234,7 +250,14 @@ export class DayZeroChannel implements Channel {
     const timestamp = new Date().toISOString();
 
     logger.info(
-      { runId: runId.slice(0, 8), workflowType, engagementMode, workflowRunId, tenantId, workspaceId },
+      {
+        runId: runId.slice(0, 8),
+        workflowType,
+        engagementMode,
+        workflowRunId,
+        tenantId,
+        workspaceId,
+      },
       'Workflow run requested',
     );
 
@@ -276,11 +299,19 @@ export class DayZeroChannel implements Channel {
         promptLines.push(`Workspace ID: ${workspaceId}`);
       }
       promptLines.push('', 'Update workflow progress via GraphQL mutation:');
-      promptLines.push('updateWorkflowRun(workflowRunId, status, progress, currentPhase, currentTask)');
+      promptLines.push(
+        'updateWorkflowRun(workflowRunId, status, progress, currentPhase, currentTask)',
+      );
     }
 
     // Report metadata for group discovery
-    this.opts.onChatMetadata(DAYZERO_JID, timestamp, 'DayZero', 'dayzero', true);
+    this.opts.onChatMetadata(
+      DAYZERO_JID,
+      timestamp,
+      'DayZero',
+      'dayzero',
+      true,
+    );
 
     // Inject message into NanoClaw message flow
     this.opts.onMessage(DAYZERO_JID, {

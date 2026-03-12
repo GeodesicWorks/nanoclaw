@@ -244,7 +244,8 @@ describe('GeodesicChannel', () => {
 
     it('injects message into NanoClaw on valid request', async () => {
       // Mock fetch: first call = intent classification, second = OAuth token, third = workflow_started
-      const mockFetch = vi.fn()
+      const mockFetch = vi
+        .fn()
         // Intent classification
         .mockResolvedValueOnce({
           ok: true,
@@ -345,19 +346,18 @@ describe('GeodesicChannel', () => {
 
     it('posts to Geodesic GraphQL when conversation is active', async () => {
       // First set up an active conversation by making a start_run call
-      const mockFetch = vi.fn()
-        .mockResolvedValue({
-          ok: true,
-          json: async () => ({
-            access_token: 'tok',
-            expires_in: 3600,
-            content: [{ text: 'NO' }],
-            data: { appendScenarioRunLog: 1 },
-          }),
-          text: async () => '{}',
-          status: 200,
-          body: null,
-        });
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: 'tok',
+          expires_in: 3600,
+          content: [{ text: 'NO' }],
+          data: { appendScenarioRunLog: 1 },
+        }),
+        text: async () => '{}',
+        status: 200,
+        body: null,
+      });
       vi.stubGlobal('fetch', mockFetch);
 
       await postJson(port, '/v1/start_run', {

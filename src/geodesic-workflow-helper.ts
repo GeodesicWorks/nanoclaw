@@ -120,7 +120,10 @@ export class GeodesicWorkflowHelper {
         data?: { updateWorkflowRun?: boolean };
       };
       if (data.errors) {
-        logger.error({ errors: data.errors }, 'GraphQL errors in workflow update');
+        logger.error(
+          { errors: data.errors },
+          'GraphQL errors in workflow update',
+        );
         return false;
       }
 
@@ -138,7 +141,10 @@ export class GeodesicWorkflowHelper {
   /**
    * Mark workflow as started
    */
-  async markStarted(workflowRunId: string, currentTask?: string): Promise<boolean> {
+  async markStarted(
+    workflowRunId: string,
+    currentTask?: string,
+  ): Promise<boolean> {
     return this.updateWorkflowRun(workflowRunId, {
       status: 'running',
       progress: 0,
