@@ -12,13 +12,16 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
 | `src/channels/registry.ts` | Channel registry (self-registration at startup) |
-| `src/ipc.ts` | IPC watcher and task processing |
+| `src/channels/dayzero.ts` | DayZero HTTP API channel (auto-registers group, mounts workflows) |
+| `src/ipc.ts` | IPC watcher and task processing (incl. Geodesic workflow updates) |
+| `src/geodesic-workflow-helper.ts` | GraphQL client for Geodesic workflow progress updates |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
+| `docs/DAYZERO-API.md` | DayZero API specification |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
 
 ## Skills

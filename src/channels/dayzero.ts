@@ -11,6 +11,8 @@
 import crypto from 'crypto';
 import http from 'http';
 
+import fs from 'fs';
+
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -31,6 +33,7 @@ const DAYZERO_JID = 'internal:dayzero';
 interface RunRecord {
   id: string;
   workflowType: string;
+  company: string;
   engagementMode: string;
   status: 'running' | 'completed' | 'error';
   startedAt: string;
@@ -45,6 +48,7 @@ interface DayZeroChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  registerGroup: (jid: string, group: RegisteredGroup) => void;
 }
 
 // --- Channel Implementation ---
@@ -57,6 +61,7 @@ export class DayZeroChannel implements Channel {
   private port: number;
   private opts: DayZeroChannelOpts;
   private apiKey: string | null;
+  private repoPath: string | null;
 
   // Track active and completed runs
   private runs = new Map<string, RunRecord>();
@@ -64,7 +69,11 @@ export class DayZeroChannel implements Channel {
   constructor(opts: DayZeroChannelOpts) {
     this.opts = opts;
 
-    const envConfig = readEnvFile(['DAYZERO_PORT', 'DAYZERO_API_KEY']);
+    const envConfig = readEnvFile([
+      'DAYZERO_PORT',
+      'DAYZERO_API_KEY',
+      'DAYZERO_WORKFLOWS_PATH',
+    ]);
     this.port = parseInt(
       process.env.DAYZERO_PORT ||
         envConfig.DAYZERO_PORT ||
@@ -73,6 +82,10 @@ export class DayZeroChannel implements Channel {
     );
     this.apiKey =
       process.env.DAYZERO_API_KEY || envConfig.DAYZERO_API_KEY || null;
+    this.repoPath =
+      process.env.DAYZERO_WORKFLOWS_PATH ||
+      envConfig.DAYZERO_WORKFLOWS_PATH ||
+      null;
 
     if (!this.apiKey) {
       logger.warn(
@@ -83,6 +96,9 @@ export class DayZeroChannel implements Channel {
   }
 
   async connect(): Promise<void> {
+    // Auto-register the dayzero group with DayZero repo mounted
+    this.ensureGroupRegistered();
+
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) =>
         this.handleRequest(req, res),
@@ -102,6 +118,46 @@ export class DayZeroChannel implements Channel {
         resolve();
       });
     });
+  }
+
+  private ensureGroupRegistered(): void {
+    const groups = this.opts.registeredGroups();
+    if (groups[DAYZERO_JID]) return;
+
+    const group: RegisteredGroup = {
+      name: 'DayZero',
+      folder: 'dayzero',
+      trigger: '',
+      added_at: new Date().toISOString(),
+      requiresTrigger: false,
+    };
+
+    // Mount the workflows directory (contains all Geodesic repos) read-only.
+    // Each repo may contain its own workflow framework and data packages.
+    // Run output goes to /workspace/group/runs/ which is already writable.
+    if (this.repoPath && fs.existsSync(this.repoPath)) {
+      group.containerConfig = {
+        additionalMounts: [
+          {
+            hostPath: this.repoPath,
+            containerPath: 'workflows',
+            readonly: true,
+          },
+        ],
+        timeout: 600000, // 10 minutes — assessments are long-running
+      };
+      logger.info(
+        { repoPath: this.repoPath },
+        'Workflows directory will be mounted at /workspace/extra/workflows (read-only)',
+      );
+    } else {
+      logger.warn(
+        'DAYZERO_WORKFLOWS_PATH not set or path does not exist. ' +
+          'Set DAYZERO_WORKFLOWS_PATH in .env to mount workflow repositories.',
+      );
+    }
+
+    this.opts.registerGroup(DAYZERO_JID, group);
   }
 
   async sendMessage(_jid: string, text: string): Promise<void> {
@@ -223,8 +279,8 @@ export class DayZeroChannel implements Channel {
     body: Record<string, unknown>,
     res: http.ServerResponse,
   ): Promise<void> {
-    // Workflow type determines which agent group to route to
-    const workflowType = String(body.workflow_type || body.company || '');
+    const workflowType = String(body.workflow_type || '');
+    const company = String(body.company || '');
     const engagementMode = String(
       body.engagement_mode || body.engagementMode || 'turnaround_diagnostic',
     );
@@ -246,6 +302,13 @@ export class DayZeroChannel implements Channel {
       return;
     }
 
+    if (!company) {
+      this.sendJson(res, 400, {
+        error: 'Missing required field: company',
+      });
+      return;
+    }
+
     const runId = crypto.randomUUID();
     const timestamp = new Date().toISOString();
 
@@ -253,6 +316,7 @@ export class DayZeroChannel implements Channel {
       {
         runId: runId.slice(0, 8),
         workflowType,
+        company,
         engagementMode,
         workflowRunId,
         tenantId,
@@ -265,6 +329,7 @@ export class DayZeroChannel implements Channel {
     const run: RunRecord = {
       id: runId,
       workflowType,
+      company,
       engagementMode,
       status: 'running',
       startedAt: timestamp,
@@ -277,11 +342,12 @@ export class DayZeroChannel implements Channel {
 
     // Build prompt for the agent based on workflow type
     const promptLines = [
-      `Run a ${workflowType} workflow (${engagementMode} mode)`,
+      `Run a ${workflowType} workflow (${engagementMode} mode) for company: ${company}`,
       '',
       `Run ID: ${runId}`,
-      `Data package: /workspace/extra/workflows/data/${workflowType}/`,
-      `Output directory: /workspace/extra/workflows/runs/${workflowType}_${runId.slice(0, 8)}/`,
+      `Workflow repo: /workspace/extra/workflows/DayZero/`,
+      `Data package: /workspace/extra/workflows/DayZero/data/${company}/`,
+      `Output directory: /workspace/group/runs/${company}_${runId.slice(0, 8)}/`,
     ];
 
     if (phase) {
@@ -329,6 +395,7 @@ export class DayZeroChannel implements Channel {
       status: 'started',
       run_id: runId,
       workflow_type: workflowType,
+      company,
       engagement_mode: engagementMode,
       poll_url: `/v1/runs/${runId}`,
     });
@@ -344,6 +411,7 @@ export class DayZeroChannel implements Channel {
     const response: Record<string, unknown> = {
       id: run.id,
       workflow_type: run.workflowType,
+      company: run.company,
       engagement_mode: run.engagementMode,
       status: run.status,
       started_at: run.startedAt,
@@ -381,6 +449,7 @@ export class DayZeroChannel implements Channel {
     const runs = [...this.runs.values()].map((r) => ({
       id: r.id,
       workflow_type: r.workflowType,
+      company: r.company,
       engagement_mode: r.engagementMode,
       status: r.status,
       started_at: r.startedAt,

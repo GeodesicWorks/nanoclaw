@@ -6,9 +6,80 @@ import { CronExpressionParser } from 'cron-parser';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { readEnvFile } from './env.js';
+import {
+  GeodesicWorkflowHelper,
+  WorkflowUpdateOptions,
+} from './geodesic-workflow-helper.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
+
+// --- Geodesic OAuth token cache ---
+let cachedGeodesicToken: string | null = null;
+let geodesicTokenExpiresAt = 0;
+
+async function getGeodesicToken(): Promise<string | null> {
+  if (cachedGeodesicToken && Date.now() < geodesicTokenExpiresAt) {
+    return cachedGeodesicToken;
+  }
+
+  const env = readEnvFile([
+    'GEODESIC_AUTH_TENANT_ID',
+    'GEODESIC_AUTH_CLIENT_ID',
+    'GEODESIC_AUTH_CLIENT_SECRET',
+    'GEODESIC_AUTH_SCOPE',
+  ]);
+
+  const tid =
+    process.env.GEODESIC_AUTH_TENANT_ID || env.GEODESIC_AUTH_TENANT_ID;
+  const clientId =
+    process.env.GEODESIC_AUTH_CLIENT_ID || env.GEODESIC_AUTH_CLIENT_ID;
+  const clientSecret =
+    process.env.GEODESIC_AUTH_CLIENT_SECRET || env.GEODESIC_AUTH_CLIENT_SECRET;
+  const scope = process.env.GEODESIC_AUTH_SCOPE || env.GEODESIC_AUTH_SCOPE;
+
+  if (!tid || !clientId || !clientSecret || !scope) {
+    logger.warn('Missing GEODESIC_AUTH_* credentials for workflow updates');
+    return null;
+  }
+
+  const tokenUrl = `https://${tid}.ciamlogin.com/${tid}/oauth2/v2.0/token`;
+  const params = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret,
+    scope: scope + '/.default',
+  });
+
+  try {
+    const resp = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+
+    if (!resp.ok) {
+      logger.error(
+        { status: resp.status },
+        'Failed to obtain Geodesic OAuth token',
+      );
+      return null;
+    }
+
+    const data = (await resp.json()) as {
+      access_token: string;
+      expires_in: number;
+    };
+    cachedGeodesicToken = data.access_token;
+    // Refresh 60s before expiry
+    geodesicTokenExpiresAt = Date.now() + (data.expires_in - 60) * 1000;
+    return cachedGeodesicToken;
+  } catch (err) {
+    logger.error({ err }, 'Exception obtaining Geodesic OAuth token');
+    return null;
+  }
+}
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -171,6 +242,13 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For update_workflow
+    workflowRunId?: string;
+    status?: string;
+    progress?: number;
+    currentPhase?: string;
+    currentTask?: string;
+    errorMessage?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -382,6 +460,53 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'update_workflow': {
+      const wfRunId = data.workflowRunId as string | undefined;
+      if (!wfRunId) {
+        logger.warn('update_workflow missing workflowRunId');
+        break;
+      }
+
+      const token = await getGeodesicToken();
+      if (!token) {
+        logger.warn('Cannot update workflow — no Geodesic token');
+        break;
+      }
+
+      const env = readEnvFile(['GEODESIC_ENDPOINT', 'GEODESIC_DATA_TENANT']);
+      const endpoint = process.env.GEODESIC_ENDPOINT || env.GEODESIC_ENDPOINT;
+      const tenantId =
+        process.env.GEODESIC_DATA_TENANT || env.GEODESIC_DATA_TENANT;
+
+      if (!endpoint || !tenantId) {
+        logger.warn(
+          'Cannot update workflow — missing GEODESIC_ENDPOINT or GEODESIC_DATA_TENANT',
+        );
+        break;
+      }
+
+      const helper = new GeodesicWorkflowHelper({
+        endpoint,
+        token,
+        tenantId,
+      });
+
+      const updates: WorkflowUpdateOptions = {};
+      if (data.status)
+        updates.status = data.status as WorkflowUpdateOptions['status'];
+      if (data.progress != null) updates.progress = data.progress as number;
+      if (data.currentPhase) updates.currentPhase = data.currentPhase as string;
+      if (data.currentTask) updates.currentTask = data.currentTask as string;
+      if (data.errorMessage) updates.errorMessage = data.errorMessage as string;
+
+      const success = await helper.updateWorkflowRun(wfRunId, updates);
+      logger.info(
+        { workflowRunId: wfRunId, success, sourceGroup },
+        'Workflow update processed via IPC',
+      );
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

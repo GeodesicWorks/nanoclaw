@@ -280,6 +280,38 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'update_workflow',
+  `Update workflow progress in the Geodesic platform. Use this to report phase transitions, progress percentage, and completion status. Only works when the run was triggered with a workflow_run_id.`,
+  {
+    workflow_run_id: z.string().describe('The Geodesic workflow run ID (from the run prompt)'),
+    status: z.enum(['running', 'complete', 'failed']).describe('Current workflow status'),
+    progress: z.number().min(0).max(1).optional().describe('Progress as a decimal 0-1 (e.g. 0.25 = 25%)'),
+    current_phase: z.string().optional().describe('Current phase name (e.g. "phase_0_orient")'),
+    current_task: z.string().optional().describe('Current task description'),
+    error_message: z.string().optional().describe('Error message (when status is "failed")'),
+  },
+  async (args) => {
+    const data: Record<string, unknown> = {
+      type: 'update_workflow',
+      workflowRunId: args.workflow_run_id,
+      status: args.status,
+      progress: args.progress,
+      currentPhase: args.current_phase,
+      currentTask: args.current_task,
+      errorMessage: args.error_message,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Workflow update sent: ${args.status}${args.current_phase ? ` (${args.current_phase})` : ''}` }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
