@@ -39,7 +39,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import { startIpcWatcher } from './ipc.js';
+import { sendWorkflowFailure, startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -317,6 +317,18 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
+
+      // If this was a Geodesic workflow run, mark it as failed so the
+      // platform doesn't show a stale "running" or premature "complete".
+      const wfMatch = prompt.match(/Workflow Run ID:\s*([0-9a-f-]{36})/i);
+      if (wfMatch) {
+        const errorMsg =
+          output.error || 'Container exited unexpectedly (exit 137 / OOM)';
+        sendWorkflowFailure(wfMatch[1], errorMsg).catch((err) =>
+          logger.error({ err }, 'Failed to send workflow failure update'),
+        );
+      }
+
       return 'error';
     }
 

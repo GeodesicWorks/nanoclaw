@@ -512,3 +512,42 @@ export async function processTaskIpc(
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
 }
+
+/**
+ * Send a workflow failure update to Geodesic when a container dies unexpectedly.
+ * Called from the main process when a container exits with a non-zero code
+ * and the prompt contained a Workflow Run ID.
+ */
+export async function sendWorkflowFailure(
+  workflowRunId: string,
+  errorMessage: string,
+): Promise<void> {
+  const token = await getGeodesicToken();
+  if (!token) {
+    logger.warn(
+      { workflowRunId },
+      'Cannot send workflow failure — no Geodesic token',
+    );
+    return;
+  }
+
+  const env = readEnvFile(['GEODESIC_ENDPOINT', 'GEODESIC_DATA_TENANT']);
+  const endpoint = process.env.GEODESIC_ENDPOINT || env.GEODESIC_ENDPOINT;
+  const tenantId =
+    process.env.GEODESIC_DATA_TENANT || env.GEODESIC_DATA_TENANT;
+
+  if (!endpoint || !tenantId) {
+    logger.warn(
+      { workflowRunId },
+      'Cannot send workflow failure — missing GEODESIC_ENDPOINT or GEODESIC_DATA_TENANT',
+    );
+    return;
+  }
+
+  const helper = new GeodesicWorkflowHelper({ endpoint, token, tenantId });
+  const success = await helper.markFailed(workflowRunId, errorMessage);
+  logger.info(
+    { workflowRunId, success },
+    'Workflow failure update sent after container crash',
+  );
+}
