@@ -108,10 +108,19 @@ async function readStdin(): Promise<string> {
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
-function writeOutput(output: ContainerOutput): void {
+const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+function writeOutput(output: ContainerOutput | { status: 'heartbeat'; result: null }): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
+}
+
+function startHeartbeat(): NodeJS.Timeout {
+  return setInterval(() => {
+    writeOutput({ status: 'heartbeat', result: null });
+    log('Heartbeat sent');
+  }, HEARTBEAT_INTERVAL_MS);
 }
 
 function log(message: string): void {
@@ -539,6 +548,9 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
+  // Heartbeat keeps the host timeout alive during long-running tasks
+  const heartbeat = startHeartbeat();
+
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
   try {
@@ -585,8 +597,11 @@ async function main(): Promise<void> {
       newSessionId: sessionId,
       error: errorMessage
     });
+    clearInterval(heartbeat);
     process.exit(1);
   }
+
+  clearInterval(heartbeat);
 }
 
 main();

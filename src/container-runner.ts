@@ -42,7 +42,7 @@ export interface ContainerInput {
 }
 
 export interface ContainerOutput {
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'heartbeat';
   result: string | null;
   newSessionId?: string;
   error?: string;
@@ -373,6 +373,18 @@ export async function runContainerAgent(
 
           try {
             const parsed: ContainerOutput = JSON.parse(jsonStr);
+
+            // Heartbeat: reset timeout to keep container alive, but
+            // don't treat as real output (no onOutput callback).
+            if (parsed.status === 'heartbeat') {
+              logger.debug(
+                { group: group.name, containerName },
+                'Container heartbeat received',
+              );
+              resetTimeout();
+              continue;
+            }
+
             if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
             }
