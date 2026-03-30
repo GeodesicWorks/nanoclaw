@@ -185,14 +185,21 @@ export class DayZeroChannel implements Channel {
           timestamp: new Date().toISOString(),
         });
         logger.info(
-          { runId: run.id.slice(0, 8), workflowType: run.workflowType, length: text.length },
+          {
+            runId: run.id.slice(0, 8),
+            workflowType: run.workflowType,
+            length: text.length,
+          },
           'Workflow agent response captured',
         );
         return;
       }
     }
 
-    logger.warn({ jid }, 'Workflow agent response received but no active run for JID');
+    logger.warn(
+      { jid },
+      'Workflow agent response received but no active run for JID',
+    );
   }
 
   isConnected(): boolean {
@@ -325,9 +332,12 @@ export class DayZeroChannel implements Channel {
 
     // Resolve the target group JID from workflow type
     const targetJid = WORKFLOW_JID_MAP[workflowType] || DAYZERO_JID;
-    const targetFolder = workflowType === 'basin' ? 'basin'
-      : workflowType === 'curator' ? 'curator'
-      : 'dayzero';
+    const targetFolder =
+      workflowType === 'basin'
+        ? 'basin'
+        : workflowType === 'curator'
+          ? 'curator'
+          : 'dayzero';
 
     const runId = crypto.randomUUID();
     const timestamp = new Date().toISOString();
@@ -364,8 +374,15 @@ export class DayZeroChannel implements Channel {
 
     // Build prompt for the agent based on workflow type
     const promptLines = this.buildPrompt(
-      workflowType, company, engagementMode, runId, phase,
-      workflowRunId, tenantId, workspaceId, body,
+      workflowType,
+      company,
+      engagementMode,
+      runId,
+      phase,
+      workflowRunId,
+      tenantId,
+      workspaceId,
+      body,
     );
 
     // Report metadata for group discovery
@@ -492,9 +509,13 @@ export class DayZeroChannel implements Channel {
         `SDG output: ${sdgOutputPath}`,
       );
       if (dayzeroRunDir) {
-        promptLines.push(`DayZero run output: /workspace/extra/workflows/DayZero/runs/${dayzeroRunDir}/`);
+        promptLines.push(
+          `DayZero run output: /workspace/extra/workflows/DayZero/runs/${dayzeroRunDir}/`,
+        );
       }
-      promptLines.push(`Output directory: /workspace/group/runs/${company}_${runId.slice(0, 8)}/`);
+      promptLines.push(
+        `Output directory: /workspace/group/runs/${company}_${runId.slice(0, 8)}/`,
+      );
       if (scenarios && scenarios.length > 0) {
         promptLines.push('', `Scenarios to run: ${scenarios.join(', ')}`);
       }

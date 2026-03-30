@@ -242,7 +242,9 @@ export class GeodesicChannel implements Channel {
     const runId = String(body.runId || body.run_id || '');
     const workspaceId = String(body.workspaceId || body.workspace_id || '');
     const tenantId = String(body.tenantId || body.tenant_id || '');
-    const userPrompt = String(body.prompt || body.message || body.inputs || '(empty)');
+    const userPrompt = String(
+      body.prompt || body.message || body.inputs || '(empty)',
+    );
 
     if (!runId || !workspaceId || !tenantId) {
       this.sendJson(res, 400, {
