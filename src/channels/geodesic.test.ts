@@ -57,6 +57,7 @@ function createTestOpts() {
         requiresTrigger: false,
       },
     })),
+    registerGroup: vi.fn(),
   };
 }
 

@@ -39,6 +39,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import { publishDayZeroReports } from './dayzero-publish.js';
 import { sendWorkflowFailure, startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
@@ -213,6 +214,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'success') {
       queue.notifyIdle(chatJid);
+
+      // Host-side report publishing for DayZero workflow runs.
+      // Trigger on success rather than after container exit, since the
+      // container stays alive waiting for follow-up messages.
+      if (
+        group.folder === 'dayzero' &&
+        prompt.match(/Workflow Run ID:\s*[0-9a-f-]{36}/i)
+      ) {
+        publishDayZeroReports(group.folder, prompt).catch((err) =>
+          logger.error({ err, group: group.name }, 'Host-side publish failed'),
+        );
+      }
     }
 
     if (result.status === 'error') {

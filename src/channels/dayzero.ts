@@ -27,6 +27,14 @@ import {
 
 const DEFAULT_PORT = 9002;
 const DAYZERO_JID = 'internal:dayzero';
+const BASIN_JID = 'internal:basin';
+
+// Map workflow_type → JID for routing
+const WORKFLOW_JID_MAP: Record<string, string> = {
+  dayzero: DAYZERO_JID,
+  basin: BASIN_JID,
+  curator: 'internal:curator',
+};
 
 // --- Interfaces ---
 
@@ -38,6 +46,7 @@ interface RunRecord {
   status: 'running' | 'completed' | 'error';
   startedAt: string;
   messages: Array<{ text: string; timestamp: string }>;
+  jid: string; // Which group JID this run routes to
   // Geodesic workflow integration
   workflowRunId?: string;
   tenantId?: string;
@@ -96,8 +105,9 @@ export class DayZeroChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    // Auto-register the dayzero group with DayZero repo mounted
-    this.ensureGroupRegistered();
+    // Auto-register workflow groups with repo mounts
+    this.ensureGroupRegistered('dayzero', DAYZERO_JID, 'DayZero', 600000);
+    this.ensureGroupRegistered('basin', BASIN_JID, 'Basin', 900000);
 
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) =>
@@ -120,13 +130,18 @@ export class DayZeroChannel implements Channel {
     });
   }
 
-  private ensureGroupRegistered(): void {
+  private ensureGroupRegistered(
+    folder: string,
+    jid: string,
+    name: string,
+    timeout: number,
+  ): void {
     const groups = this.opts.registeredGroups();
-    if (groups[DAYZERO_JID]) return;
+    if (groups[jid]) return;
 
     const group: RegisteredGroup = {
-      name: 'DayZero',
-      folder: 'dayzero',
+      name,
+      folder,
       trigger: '',
       added_at: new Date().toISOString(),
       requiresTrigger: false,
@@ -144,41 +159,40 @@ export class DayZeroChannel implements Channel {
             readonly: true,
           },
         ],
-        timeout: 600000, // 10 minutes — assessments are long-running
+        timeout,
       };
       logger.info(
-        { repoPath: this.repoPath },
-        'Workflows directory will be mounted at /workspace/extra/workflows (read-only)',
+        { folder, repoPath: this.repoPath },
+        `${name} workflows directory will be mounted at /workspace/extra/workflows (read-only)`,
       );
-    } else {
+    } else if (jid === DAYZERO_JID) {
+      // Only warn for DayZero — Basin inherits the same mount
       logger.warn(
         'DAYZERO_WORKFLOWS_PATH not set or path does not exist. ' +
           'Set DAYZERO_WORKFLOWS_PATH in .env to mount workflow repositories.',
       );
     }
 
-    this.opts.registerGroup(DAYZERO_JID, group);
+    this.opts.registerGroup(jid, group);
   }
 
-  async sendMessage(_jid: string, text: string): Promise<void> {
+  async sendMessage(jid: string, text: string): Promise<void> {
     // Find the run that this message belongs to by matching the JID
-    // All DayZero messages go through the single internal:dayzero JID,
-    // so we append to the most recent running run
     for (const [, run] of this.runs) {
-      if (run.status === 'running') {
+      if (run.status === 'running' && run.jid === jid) {
         run.messages.push({
           text,
           timestamp: new Date().toISOString(),
         });
         logger.info(
-          { runId: run.id.slice(0, 8), length: text.length },
-          'DayZero agent response captured',
+          { runId: run.id.slice(0, 8), workflowType: run.workflowType, length: text.length },
+          'Workflow agent response captured',
         );
         return;
       }
     }
 
-    logger.warn('DayZero agent response received but no active run');
+    logger.warn({ jid }, 'Workflow agent response received but no active run for JID');
   }
 
   isConnected(): boolean {
@@ -186,7 +200,7 @@ export class DayZeroChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid === DAYZERO_JID;
+    return Object.values(WORKFLOW_JID_MAP).includes(jid);
   }
 
   async disconnect(): Promise<void> {
@@ -309,6 +323,12 @@ export class DayZeroChannel implements Channel {
       return;
     }
 
+    // Resolve the target group JID from workflow type
+    const targetJid = WORKFLOW_JID_MAP[workflowType] || DAYZERO_JID;
+    const targetFolder = workflowType === 'basin' ? 'basin'
+      : workflowType === 'curator' ? 'curator'
+      : 'dayzero';
+
     const runId = crypto.randomUUID();
     const timestamp = new Date().toISOString();
 
@@ -318,6 +338,7 @@ export class DayZeroChannel implements Channel {
         workflowType,
         company,
         engagementMode,
+        targetJid,
         workflowRunId,
         tenantId,
         workspaceId,
@@ -334,6 +355,7 @@ export class DayZeroChannel implements Channel {
       status: 'running',
       startedAt: timestamp,
       messages: [],
+      jid: targetJid,
       workflowRunId,
       tenantId,
       workspaceId,
@@ -341,50 +363,26 @@ export class DayZeroChannel implements Channel {
     this.runs.set(runId, run);
 
     // Build prompt for the agent based on workflow type
-    const promptLines = [
-      `Run a ${workflowType} workflow (${engagementMode} mode) for company: ${company}`,
-      '',
-      `Run ID: ${runId}`,
-      `Workflow repo: /workspace/extra/workflows/DayZero/`,
-      `Data package: /workspace/extra/workflows/DayZero/data/${company}/`,
-      `Output directory: /workspace/group/runs/${company}_${runId.slice(0, 8)}/`,
-    ];
-
-    if (phase) {
-      promptLines.push('', `Resume from phase: ${phase}`);
-    }
-
-    // Include Geodesic workflow context if provided
-    if (workflowRunId) {
-      promptLines.push('', '--- Geodesic Workflow Integration ---');
-      promptLines.push(`Workflow Run ID: ${workflowRunId}`);
-      if (tenantId) {
-        promptLines.push(`Tenant ID: ${tenantId}`);
-      }
-      if (workspaceId) {
-        promptLines.push(`Workspace ID: ${workspaceId}`);
-      }
-      promptLines.push('', 'Update workflow progress via GraphQL mutation:');
-      promptLines.push(
-        'updateWorkflowRun(workflowRunId, status, progress, currentPhase, currentTask)',
-      );
-    }
+    const promptLines = this.buildPrompt(
+      workflowType, company, engagementMode, runId, phase,
+      workflowRunId, tenantId, workspaceId, body,
+    );
 
     // Report metadata for group discovery
     this.opts.onChatMetadata(
-      DAYZERO_JID,
+      targetJid,
       timestamp,
-      'DayZero',
-      'dayzero',
+      workflowType.charAt(0).toUpperCase() + workflowType.slice(1),
+      targetFolder,
       true,
     );
 
     // Inject message into NanoClaw message flow
-    this.opts.onMessage(DAYZERO_JID, {
+    this.opts.onMessage(targetJid, {
       id: runId,
-      chat_jid: DAYZERO_JID,
-      sender: 'dayzero-api',
-      sender_name: 'DayZero API',
+      chat_jid: targetJid,
+      sender: 'workflow-api',
+      sender_name: `${workflowType} API`,
       content: promptLines.join('\n'),
       timestamp,
       is_from_me: false,
@@ -460,6 +458,79 @@ export class DayZeroChannel implements Channel {
   }
 
   // --- Helpers ---
+
+  private buildPrompt(
+    workflowType: string,
+    company: string,
+    engagementMode: string,
+    runId: string,
+    phase: string | undefined,
+    workflowRunId: string | undefined,
+    tenantId: string | undefined,
+    workspaceId: string | undefined,
+    body: Record<string, unknown>,
+  ): string[] {
+    const promptLines: string[] = [];
+
+    if (workflowType === 'basin') {
+      // Basin needs SDG path and DayZero run reference
+      const sdgOutputPath = body.sdg_output_path
+        ? String(body.sdg_output_path)
+        : `/workspace/extra/workflows/Synthetic-Data-Generator/runs/${company}/output`;
+      const dayzeroRunDir = body.dayzero_run_dir
+        ? String(body.dayzero_run_dir)
+        : undefined;
+      const scenarios = body.scenarios
+        ? (body.scenarios as string[])
+        : undefined;
+
+      promptLines.push(
+        `Run a Basin simulation for company: ${company}`,
+        '',
+        `Run ID: ${runId}`,
+        `Simulation repo: /workspace/extra/workflows/Simulation/`,
+        `SDG output: ${sdgOutputPath}`,
+      );
+      if (dayzeroRunDir) {
+        promptLines.push(`DayZero run output: /workspace/extra/workflows/DayZero/runs/${dayzeroRunDir}/`);
+      }
+      promptLines.push(`Output directory: /workspace/group/runs/${company}_${runId.slice(0, 8)}/`);
+      if (scenarios && scenarios.length > 0) {
+        promptLines.push('', `Scenarios to run: ${scenarios.join(', ')}`);
+      }
+    } else {
+      // DayZero and other workflow types
+      promptLines.push(
+        `Run a ${workflowType} workflow (${engagementMode} mode) for company: ${company}`,
+        '',
+        `Run ID: ${runId}`,
+        `Workflow repo: /workspace/extra/workflows/DayZero/`,
+        `Data package: /workspace/extra/workflows/DayZero/data/${company}/`,
+        `Output directory: /workspace/group/runs/${company}_${runId.slice(0, 8)}/`,
+      );
+      if (phase) {
+        promptLines.push('', `Resume from phase: ${phase}`);
+      }
+    }
+
+    // Include Geodesic workflow context if provided
+    if (workflowRunId) {
+      promptLines.push('', '--- Geodesic Workflow Integration ---');
+      promptLines.push(`Workflow Run ID: ${workflowRunId}`);
+      if (tenantId) {
+        promptLines.push(`Tenant ID: ${tenantId}`);
+      }
+      if (workspaceId) {
+        promptLines.push(`Workspace ID: ${workspaceId}`);
+      }
+      promptLines.push('', 'Update workflow progress via GraphQL mutation:');
+      promptLines.push(
+        'updateWorkflowRun(workflowRunId, status, progress, currentPhase, currentTask)',
+      );
+    }
+
+    return promptLines;
+  }
 
   private isAuthenticated(req: http.IncomingMessage): boolean {
     if (!this.apiKey) {

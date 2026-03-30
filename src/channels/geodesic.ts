@@ -55,6 +55,7 @@ interface GeodesicChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  registerGroup: (jid: string, group: RegisteredGroup) => void;
 }
 
 // --- Channel Implementation ---
@@ -241,7 +242,7 @@ export class GeodesicChannel implements Channel {
     const runId = String(body.runId || body.run_id || '');
     const workspaceId = String(body.workspaceId || body.workspace_id || '');
     const tenantId = String(body.tenantId || body.tenant_id || '');
-    const userPrompt = String(body.prompt || body.inputs || '(empty)');
+    const userPrompt = String(body.prompt || body.message || body.inputs || '(empty)');
 
     if (!runId || !workspaceId || !tenantId) {
       this.sendJson(res, 400, {
@@ -312,13 +313,25 @@ export class GeodesicChannel implements Channel {
       ].join('\n');
     }
 
+    // Auto-register the group if not already registered
+    const groups = this.opts.registeredGroups();
+    if (!groups[jid]) {
+      this.opts.registerGroup(jid, {
+        name: `Geodesic ${workspaceId.slice(0, 8)}`,
+        folder: COPILOT_GROUP_FOLDER,
+        trigger: '',
+        added_at: new Date().toISOString(),
+        requiresTrigger: false,
+      });
+    }
+
     // Report metadata for group discovery
     const timestamp = new Date().toISOString();
     this.opts.onChatMetadata(
       jid,
       timestamp,
       `Geodesic ${workspaceId.slice(0, 8)}`,
-      'geodesic',
+      COPILOT_GROUP_FOLDER,
       true,
     );
 

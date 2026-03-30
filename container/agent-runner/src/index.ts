@@ -526,6 +526,24 @@ async function main(): Promise<void> {
     if (key === 'GITHUB_TOKEN') {
       process.env.GITHUB_TOKEN = value;
     }
+    // Expose Geodesic credentials so publish scripts can use them from Bash
+    const geodesicEnvKeys = [
+      'GEODESIC_ENDPOINT',
+      'GEODESIC_DATA_TENANT',
+      'GEODESIC_AUTH_TENANT_ID',
+      'GEODESIC_AUTH_CLIENT_ID',
+      'GEODESIC_AUTH_CLIENT_SECRET',
+      'GEODESIC_AUTH_SCOPE',
+    ];
+    if (geodesicEnvKeys.includes(key)) {
+      process.env[key] = value;
+    }
+    if (key === 'GEODESIC_ENDPOINT') {
+      process.env.GRAPHQL_ENDPOINT = value;
+    }
+    if (key === 'GEODESIC_DATA_TENANT') {
+      process.env.TENANT_ID = value;
+    }
   }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));

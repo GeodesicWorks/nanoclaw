@@ -24,10 +24,15 @@ fi
 sed -i "s|^CLAUDE_CODE_OAUTH_TOKEN=.*|CLAUDE_CODE_OAUTH_TOKEN=$NEW_TOKEN|" "$ENV_FILE"
 
 # Restart NanoClaw to pick up the new token
-pkill -f 'node.*dist/index.js' 2>/dev/null
-sleep 3
-fuser -k 9001/tcp 9002/tcp 2>/dev/null
-sleep 1
-cd /root/NanoClaw && nohup /usr/bin/node /root/NanoClaw/dist/index.js > /tmp/nanoclaw.log 2>&1 &
+# Use systemctl if the service exists, otherwise fall back to manual restart
+if systemctl is-active nanoclaw.service >/dev/null 2>&1; then
+  systemctl restart nanoclaw.service
+else
+  pkill -f 'node.*dist/index.js' 2>/dev/null
+  sleep 3
+  fuser -k 9001/tcp 9002/tcp 2>/dev/null
+  sleep 1
+  cd /root/NanoClaw && nohup /usr/bin/node /root/NanoClaw/dist/index.js > /tmp/nanoclaw.log 2>&1 &
+fi
 
 echo "Token refreshed and NanoClaw restarted at $(date)"

@@ -533,8 +533,7 @@ export async function sendWorkflowFailure(
 
   const env = readEnvFile(['GEODESIC_ENDPOINT', 'GEODESIC_DATA_TENANT']);
   const endpoint = process.env.GEODESIC_ENDPOINT || env.GEODESIC_ENDPOINT;
-  const tenantId =
-    process.env.GEODESIC_DATA_TENANT || env.GEODESIC_DATA_TENANT;
+  const tenantId = process.env.GEODESIC_DATA_TENANT || env.GEODESIC_DATA_TENANT;
 
   if (!endpoint || !tenantId) {
     logger.warn(
